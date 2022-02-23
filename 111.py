@@ -3,6 +3,7 @@ import pytesseract.pytesseract as py_t
 import logging
 import logging.config
 import re
+import json
 
 logging.config.fileConfig('logging.conf')
 logger = logging.getLogger('ocr_logger')
@@ -45,9 +46,11 @@ def get_location(location_name):
     geolocator = Nominatim(user_agent="ocr_webapp")
     location = geolocator.geocode(location_name)
     try:
+        logger.info('Location found!')
         return {'lat': location.latitude,
                 'lng': location.longitude}
     except AttributeError:
+        logger.info('Not found!')
         return None
 
 
@@ -56,6 +59,10 @@ def parse_data(filepath):
         with open(filepath, 'r', encoding='utf-8') as file:
             temp = ''
             return [line.strip('\n') for line in file.readlines()]
+
+    def serialize(data):
+        with open('result.json', 'w', encoding='utf-8') as result:
+            json.dump(data, result, ensure_ascii=False)
 
     def retrieve_fields(data):
         decanat_name = data[0].split(' ')[1]
@@ -71,48 +78,53 @@ def parse_data(filepath):
             temp = re.findall('^[0-9]+\) (.*?),', line)
             if temp:
                 towns[i] = temp
-        print()
-        print(churches)
-        print()
-        print(towns)
-        print()
+
         for i in towns:
             decanat_data.append({
                 "протопресвітерат": protopres_name,
                 "деканат": decanat_name,
                 "населений пункт": {
                     "назва": towns[i],
-                    #"location": get_location(towns[i])
                 },
             })
+            loc = get_location(towns[i])
+            if loc:
+                decanat_data[-1]["населений пункт"]["location"] = loc
             town_churches = []
             for church in churches[i]:
                 current_church = {
                     'назва': church
                 }
                 temp = data[i].split(church)[1].split(' ')
+
                 for j, word in enumerate(temp):
                     if word.strip(',') in ['мур.', 'дер.', 'М. дер.', 'відмур. на стар. фунд.']:
                         current_church['тип'] = word.strip(',')
                         year = re.findall(word + ' ([0-9]+)', data[i])
                         if year:
                             current_church['рік'] = year[0]
+                    elif word.strip(',') in ['віз.', 'зруйн.', 'відб.', 'відбуд.']:
+                        year = re.findall(word + ' ([0-9]+)', data[i])
+                        if year:
+                            current_church[word.strip(',')] = year[0]
+                    elif 'Дн.' in word:
+                        current_church['Дн.'] = 'Дн.'
                 town_churches.append(current_church)
-            print(town_churches)
-
+            decanat_data[-1]['церкви'] = town_churches
+        return decanat_data
 
     data = read_from_file(filepath)
-    print(data)
-    retrieve_fields(data)
+    data = retrieve_fields(data)
+    serialize(data)
 
 
 def main():
     data = get_pictures('data')
     result_path = 'деканати\\Галицький.txt'
     create_dir(result_path.split('\\')[0])
-    #recognise_text(result_path, data)
+    # recognise_text(result_path, data)
     parse_data(result_path)
-    
+
 
 if __name__ == '__main__':
     main()
